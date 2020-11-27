@@ -1,0 +1,63 @@
+import pandas as pd
+import numpy as np
+DT = pd.read_excel(r'D:\data\sdl_wide.xlsx', sep = '')#直接读宽表
+#------数据预处理
+'''
+print(DT.head())
+'''
+diabetes =  DT.drop([0])#删除第一行，空值太多
+diabetes = diabetes[0:77]#只算到2020年6月
+diabetes = diabetes.fillna(axis=0,method='ffill')#填充null值，填充值为前一行的值
+diabetes = diabetes.fillna(axis=0,method='bfill')#填充null值，填充值为上一行的值
+predictors = diabetes.columns[1:25] #自变量选择
+#------自变量分类，y1是计算到77行，y2计算到76行
+
+y1 =['售电量合计',	'sdl-居民生活','sdl-大工业（含直购）','sdl-一般工商业（含直购）','sdl-农业用电','sdl-贫困县农业排灌用电','sdl-抽水蓄能','sdl-趸售']
+y2 =['sdl-全社会售电量','sdl-第一产业','sdl-第二产业','sdl-第三产业','sdl-城乡居民生活']
+#------数据分类
+from sklearn import model_selection
+for i in y1:
+    X_train, X_test, y_train, y_test = model_selection.train_test_split(diabetes[predictors], diabetes[i], 
+                                                       test_size = 0.2, random_state = 1234 )
+                                                #此处因变量售电量合计可以更改，更改为工业售电量等
+    
+    lasso(X_train, X_test, y_train, y_test,i)            
+for i in y2:
+    diabetes = diabetes[0:76]#只算到2020年5月
+    X_train, X_test, y_train, y_test = model_selection.train_test_split(diabetes[predictors], diabetes[i], 
+                                                       test_size = 0.2, random_state = 1234 )
+    lasso(X_train, X_test, y_train, y_test,i)
+#------模型构建
+# 构造不同的Lambda值
+def lasso(X_train, X_test, y_train, y_test,name_y):
+
+    Lambdas = np.logspace(-5, 2, 200)
+    from sklearn.linear_model import Lasso,LassoCV
+    # lasso归模型的交叉验证
+    # 设置交叉验证的参数，对于每一个Lambda值，都执行10重交叉验证
+    lasso_cv = LassoCV(alphas = Lambdas, normalize=True, cv = 10, max_iter=10000)
+    lasso_cv.fit(X_train, y_train)
+    # 输出最佳的lambda值
+    lasso_best_alpha = lasso_cv.alpha_
+    # 基于最佳的lambda值建模
+    lasso = Lasso(alpha = lasso_best_alpha, normalize=True, max_iter=10000)
+
+    lasso.fit(X_train, y_train)#拟合、训练
+    lasso_predict = lasso.predict(X_test)#预测
+
+    #--------参数系数、准确率、R方
+    ndex = ['Intercept'] + X_train.columns.tolist()
+    data1 = [lasso.intercept_] + lasso.coef_.tolist()
+    abs_data =[]
+    for i in data1:
+        abs_data.append(abs(i))
+    data = {'coef_data':[lasso.intercept_] + lasso.coef_.tolist(),'abs_data':abs_data }
+    coef_dataframe = pd.DataFrame(data, index = ['Intercept'] + X_train.columns.tolist())
+
+    print('因变量取%s:'%name_y,coef_dataframe.sort_values(by = 'abs_data',ascending = False).drop('abs_data',axis=1),sep='\n')#按系数绝对值排序
+    #y = intercept + s1*自变量1 + s2*自变量2 + s3*自变量3......
+    r_squared = lasso.score(X_test,y_test) #R方指标
+    print('R方指标：',r_squared)
+    accuracy = 1-(abs(lasso_predict-y_test)/y_test)#准确率指标
+    print(accuracy)
+    
